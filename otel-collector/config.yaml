@@ -8,14 +8,10 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
-  # Scrape the collector's own internal metrics.
-  prometheus:
-    config:
-      scrape_configs:
-        - job_name: otel-collector
-          scrape_interval: 15s
-          static_configs:
-            - targets: ["otel-collector:8888"]
+  # NOTE: the collector's own internal telemetry is NOT scraped here. Prometheus
+  # scrapes it directly at otel-collector:8888 (see prometheus.yml). Feeding it
+  # back through the prometheus exporter caused "duplicate label names in
+  # constant and variable labels" for the otelcol_* / scrape_* series.
 
 processors:
   # Guard against memory spikes under load.
@@ -70,7 +66,7 @@ service:
       processors: [memory_limiter, resource, batch]
       exporters: [otlp/tempo]
     metrics:
-      receivers: [otlp, prometheus]
+      receivers: [otlp]
       processors: [memory_limiter, resource, batch]
       exporters: [prometheus]
     logs:
