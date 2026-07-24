@@ -1,7 +1,7 @@
 # tracemet — a self-contained observability stack for APM, tracing, metrics & logs.
 #
 # Pipeline:
-#   your apps --OTLP(host grpc:14317 / http:14318; in-network 4317/4318)--> otel-collector
+#   your apps --OTLP(host grpc:4317 / http:14318; in-network 4317/4318)--> otel-collector
 #       otel-collector --traces--> tempo
 #       otel-collector --metrics--> (Prometheus scrapes collector :8889)
 #       otel-collector --logs--> loki
@@ -37,8 +37,8 @@ services:
       # Host-side ports shifted to avoid the Datadog Agent's OTLP ports
       # (4317/4318) already bound on this host. The container still listens on
       # 4317/4318 internally, so in-network apps use otel-collector:4317 as before.
-      - "14317:4317"  # OTLP gRPC  (host)
-      - "14318:4318"  # OTLP HTTP  (host)
+      - "4317:4317"  # OTLP gRPC  (host)
+      - "4318:4318"  # OTLP HTTP  (host)
       - "8889:8889"   # Prometheus exporter (scraped by prometheus)
       - "13133:13133" # health_check
     depends_on:
