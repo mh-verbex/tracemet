@@ -1,7 +1,7 @@
 # tracemet — a self-contained observability stack for APM, tracing, metrics & logs.
 #
 # Pipeline:
-#   your apps --OTLP(grpc:4317 / http:4318)--> otel-collector
+#   your apps --OTLP(host grpc:14317 / http:14318; in-network 4317/4318)--> otel-collector
 #       otel-collector --traces--> tempo
 #       otel-collector --metrics--> (Prometheus scrapes collector :8889)
 #       otel-collector --logs--> loki
@@ -9,11 +9,15 @@
 #   node-exporter / cadvisor --> prometheus (host + container metrics)
 #   promtail --> loki (container stdout logs)
 #   grafana reads prometheus + tempo + loki (trace<->log<->metric correlation)
-#
+#  
 # Quick start:
 #   cp .env.example .env
 #   docker compose up -d
-#   open http://localhost:3000   (admin / admin by default)
+#   open http://localhost:3020   (admin / admin by default)
+#
+# Containers reach each other by service name (Docker-internal DNS). To reach a
+# service running on the HOST, use host.docker.internal (enabled via the
+# extra_hosts host-gateway mapping below; automatic on Docker Desktop).
 
 name: tracemet
 
@@ -25,11 +29,16 @@ services:
     command: ["--config=/etc/otelcol/config.yaml"]
     environment:
       DEPLOY_ENV: ${DEPLOY_ENV:-local}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
+      # Host-side ports shifted to avoid the Datadog Agent's OTLP ports
+      # (4317/4318) already bound on this host. The container still listens on
+      # 4317/4318 internally, so in-network apps use otel-collector:4317 as before.
+      - "14317:4317"  # OTLP gRPC  (host)
+      - "14318:4318"  # OTLP HTTP  (host)
       - "8889:8889"   # Prometheus exporter (scraped by prometheus)
       - "13133:13133" # health_check
     depends_on:
@@ -46,6 +55,8 @@ services:
       - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
       - --web.enable-lifecycle
       - --web.enable-remote-write-receiver   # accept tempo span metrics
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -105,7 +116,7 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "3000:3000"
+      - "3020:3000"
     depends_on:
       - prometheus
       - tempo
@@ -137,7 +148,7 @@ services:
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
     ports:
-      - "8080:8080"
+      - "8088:8080"
     networks: [tracemet]
 
 volumes:

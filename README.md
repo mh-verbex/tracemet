@@ -8,12 +8,12 @@ signals correlated in Grafana out.
 
 | Component            | Role                                                          | Port(s) |
 |----------------------|---------------------------------------------------------------|---------|
-| **OTel Collector**   | Single ingest point for traces/metrics/logs (OTLP)            | 4317, 4318, 8889 |
+| **OTel Collector**   | Single ingest point for traces/metrics/logs (OTLP)            | 14317→4317, 14318→4318, 8889 |
 | **Prometheus**       | Metrics storage + scraping                                     | 9090 |
 | **Tempo**            | Trace storage + span-metrics/service-graph generation (APM)   | 3200 |
 | **Loki**             | Log storage                                                   | 3100 |
 | **Promtail**         | Ships Docker container stdout logs → Loki                     | — |
-| **Grafana**          | Dashboards, alerting, trace↔log↔metric correlation           | 3000 |
+| **Grafana**          | Dashboards, alerting, trace↔log↔metric correlation           | 3020 |
 | **Node Exporter**    | Host CPU / memory / disk / network metrics                    | 9100 |
 | **cAdvisor**         | Per-container resource metrics                                | 8080 |
 
@@ -35,7 +35,7 @@ grafana ◄── prometheus + tempo + loki
 ```bash
 cp .env.example .env          # then edit the admin password
 docker compose up -d
-open http://localhost:3000    # Grafana — admin / admin by default
+open http://localhost:3020    # Grafana — admin / admin by default
 ```
 
 The **tracemet → Overview** dashboard is provisioned automatically (RED metrics
@@ -43,11 +43,13 @@ from Tempo span-metrics + host/container metrics from node-exporter/cAdvisor).
 
 ## Sending telemetry from your app
 
-Point your OpenTelemetry SDK / auto-instrumentation at the collector:
+Point your OpenTelemetry SDK / auto-instrumentation at the collector. **Note:**
+the host OTLP ports are `14317`/`14318` (not the usual 4317/4318) because the
+Datadog Agent already owns 4317/4318 on this host.
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # HTTP
-# or grpc: http://localhost:4317
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:14318   # HTTP (host)
+# or grpc: http://localhost:14317
 export OTEL_SERVICE_NAME=my-service
 export OTEL_RESOURCE_ATTRIBUTES=service.namespace=verbex
 ```
@@ -57,7 +59,9 @@ collector endpoint. Include a `trace_id` in your structured (JSON) logs and
 Grafana links each log line straight to its trace in Tempo.
 
 If your app runs in Docker, attach it to the `tracemet` network (or merge this
-compose with your app's) and use `http://otel-collector:4318`.
+compose with your app's) and use `http://otel-collector:4318` — inside the
+Docker network the collector still listens on the standard 4317/4318, so there
+is no clash with the host's Datadog Agent.
 
 ## What you get out of the box
 

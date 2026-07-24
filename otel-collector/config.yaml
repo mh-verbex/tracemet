@@ -15,7 +15,7 @@ receivers:
         - job_name: otel-collector
           scrape_interval: 15s
           static_configs:
-            - targets: ["localhost:8888"]
+            - targets: ["otel-collector:8888"]
 
 processors:
   # Guard against memory spikes under load.
