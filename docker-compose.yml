@@ -1,0 +1,151 @@
+# tracemet — a self-contained observability stack for APM, tracing, metrics & logs.
+#
+# Pipeline:
+#   your apps --OTLP(grpc:4317 / http:4318)--> otel-collector
+#       otel-collector --traces--> tempo
+#       otel-collector --metrics--> (Prometheus scrapes collector :8889)
+#       otel-collector --logs--> loki
+#   tempo --span metrics / service graphs (remote_write)--> prometheus
+#   node-exporter / cadvisor --> prometheus (host + container metrics)
+#   promtail --> loki (container stdout logs)
+#   grafana reads prometheus + tempo + loki (trace<->log<->metric correlation)
+#
+# Quick start:
+#   cp .env.example .env
+#   docker compose up -d
+#   open http://localhost:3000   (admin / admin by default)
+
+name: tracemet
+
+services:
+  # --- OpenTelemetry Collector: single ingest point for all signals ---------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      DEPLOY_ENV: ${DEPLOY_ENV:-local}
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus exporter (scraped by prometheus)
+      - "13133:13133" # health_check
+    depends_on:
+      - tempo
+      - loki
+    networks: [tracemet]
+
+  # --- Prometheus: metrics storage + scraper --------------------------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver   # accept tempo span metrics
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [tracemet]
+
+  # --- Tempo: distributed tracing backend -----------------------------------
+  tempo:
+    image: grafana/tempo:2.6.1
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo query API (Grafana datasource)
+    networks: [tracemet]
+
+  # --- Loki: log storage ----------------------------------------------------
+  loki:
+    image: grafana/loki:3.2.1
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    networks: [tracemet]
+
+  # --- Promtail: ships Docker container stdout logs to Loki -----------------
+  promtail:
+    image: grafana/promtail:3.2.1
+    restart: unless-stopped
+    command: ["-config.file=/etc/promtail/promtail-config.yaml"]
+    volumes:
+      - ./promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    networks: [tracemet]
+
+  # --- Grafana: dashboards + unified alerting -------------------------------
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_DEFAULT_THEME: ${GRAFANA_THEME:-dark}
+      # Enable the built-in trace-to-metrics / exemplars niceties.
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+    networks: [tracemet]
+
+  # --- Node Exporter: host CPU / memory / disk / network --------------------
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "9100:9100"
+    networks: [tracemet]
+
+  # --- cAdvisor: per-container CPU / memory / network -----------------------
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "8080:8080"
+    networks: [tracemet]
+
+volumes:
+  prometheus-data:
+  tempo-data:
+  loki-data:
+  grafana-data:
+
+networks:
+  tracemet:
+    driver: bridge

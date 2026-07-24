@@ -1,0 +1,37 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    stack: tracemet
+
+scrape_configs:
+  # Prometheus itself.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Application metrics converted from OTLP by the collector.
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]   # OTLP->Prom exporter
+      - targets: ["otel-collector:8888"]   # collector self-metrics
+
+  # Host metrics.
+  - job_name: node-exporter
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # Per-container metrics.
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # Tempo internal metrics (also receives span-metrics via remote_write).
+  - job_name: tempo
+    static_configs:
+      - targets: ["tempo:3200"]
+
+  # Loki internal metrics.
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
